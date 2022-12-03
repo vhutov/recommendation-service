@@ -23,7 +23,25 @@ class UserService {
      * @param {{last_ts: ?number, limit: ?number}} options
      * @returns {Promise<number[]>} list of song ids
      */
-    getRecentLikedIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+    getRecentLikedIds = async (userId, { last_ts = null, limit = null } = {}) => {
+        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
+        const limit_clause = limit ? `LIMIT ${limit}` : ''
+
+        const rows = await this.#db.raw(`
+            SELECT 
+                song_id as id
+            FROM 
+                users_liked_songs
+            WHERE 
+                user_id = ${userId}
+                ${ts_filter}
+            ORDER BY 
+                event_time DESC
+            ${limit_clause}
+        `)
+
+        return rows.map(({ id }) => id)
+    }
 
     /**
      * Gets list of recently saved song ids
@@ -31,7 +49,25 @@ class UserService {
      * @param {{last_ts: ?number, limit: ?number}} options
      * @returns {Promise<number[]>} list of song ids
      */
-    getRecentSavedIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+    getRecentSavedIds = async (userId, { last_ts = null, limit = null } = {}) => {
+        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
+        const limit_clause = limit ? `LIMIT ${limit}` : ''
+
+        const rows = await this.#db.raw(`
+            SELECT 
+                song_id as id
+            FROM 
+                users_saved_songs
+            WHERE 
+                user_id = ${userId}
+                ${ts_filter}
+            ORDER BY 
+                event_time DESC
+            ${limit_clause}
+        `)
+
+        return rows.map(({ id }) => id)
+    }
 }
 
 async function main() {
