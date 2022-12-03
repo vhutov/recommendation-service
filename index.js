@@ -69,6 +69,43 @@ class UserService {
 
         return rows.map(({ id }) => id)
     }
+
+    /**
+     * Get list of recently liked author ids
+     * @param {number} userId
+     * @param {{last_ts: ?number, limit: ?number}} options
+     * @returns {Promise<number[]>} list of author ids
+     */
+    getRecentLikedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+
+    /**
+     * Get list of recentlysaved author ids
+     * @param {number} userId
+     * @param {{last_ts: ?number, limit: ?number}} options
+     * @returns {Promise<number[]>} list of author ids
+     */
+    getRecentSavedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+}
+
+class SongService {
+    /** @type {knex.Knex} */
+    #db
+
+    /**
+     * @param {knex.Knex} db
+     */
+    constructor(db) {
+        this.#db = db
+    }
+
+    /**
+     * Get list of recently added songs by author.
+     *
+     * @param {number[]} authorIds list of author ids
+     * @param {{fan_out: ?number}} options fan_out specifies how many songs per author
+     * @returns {Promise<Object.<number, number[]>>} list of songs per author
+     */
+    getRecentByAuthor = async (authorIds, { fan_out = null } = {}) => {}
 }
 
 class SimilarityService {
@@ -150,16 +187,20 @@ class RecommendationService {
     #similarityService
     /** @type {EnrichmentService} */
     #enrichmentService
+    /** @type {SongService} */
+    #songService
 
     /**
      * @param {UserService} userService
      * @param {SimilarityService} similarityService
      * @param {EnrichmentService} enrichmentService
+     * @param {SongService} songService
      */
-    constructor(userService, similarityService, enrichmentService) {
+    constructor(userService, similarityService, enrichmentService, songService) {
         this.#userService = userService
         this.#similarityService = similarityService
         this.#enrichmentService = enrichmentService
+        this.#songService = songService
     }
 
     /**
@@ -247,7 +288,7 @@ class RecommendationService {
             return [entity, ids]
         })
 
-        const signals = (await Promise.allSettled(pendingSignals)).filter((v) => v.value).map(v => v.value)
+        const signals = (await Promise.allSettled(pendingSignals)).filter((v) => v.value).map((v) => v.value)
 
         return signals.flatMap(([{ id, ...rest }, signals]) => {
             return signals.map((s) => ({ id: s, user: id, ...rest }))
@@ -264,7 +305,9 @@ class RecommendationService {
     liked =
         (options = {}) =>
         async (input) =>
-            this.#signals(input, (id) => this.#userService.getRecentLikedIds(id, _.isFunction(options) ? options() : options))
+            this.#signals(input, (id) =>
+                this.#userService.getRecentLikedIds(id, _.isFunction(options) ? options() : options)
+            )
 
     /**
      * For User Entities fetches Song Entities. Copies over properties from parent to children.
@@ -276,7 +319,56 @@ class RecommendationService {
     saved =
         (options = {}) =>
         async (input) =>
-            this.#signals(input, (id) => this.#userService.getRecentSavedIds(id, _.isFunction(options) ? options() : options))
+            this.#signals(input, (id) =>
+                this.#userService.getRecentSavedIds(id, _.isFunction(options) ? options() : options)
+            )
+
+    /**
+     * For User Entities fetches Author Entities. Copies over properties from parent to children.
+     * @typedef {Object.<string, any>} Entity
+     * @param {*} options see UserService#getRecentLikedAuthorIds
+     * @param {Entity|Entity[]} input
+     * @returns {Promise<Entity[]>} author ids of liked songs from input entities
+     */
+    likedAuthors =
+        (options = {}) =>
+        async (input) =>
+            this.#signals(input, (id) =>
+                this.#userService.getRecentLikedAuthorIds(id, _.isFunction(options) ? options() : options)
+            )
+
+    /**
+     * For User Entities fetches Author Entities. Copies over properties from parent to children.
+     * @typedef {Object.<string, any>} Entity
+     * @param {*} options see UserService#getRecentSavedAuthorIds
+     * @param {Entity|Entity[]} input
+     * @returns {Promise<Entity[]>} author ids of saved songs from input entities
+     */
+    savedAuthors =
+        (options = {}) =>
+        async (input) =>
+            this.#signals(input, (id) =>
+                this.#userService.getRecentSavedAuthorIds(id, _.isFunction(options) ? options() : options)
+            )
+
+    recentSongs =
+        (options = {}) =>
+        async (input) => {
+            input = toArray(input)
+            options = _.isFunction(options) ? options() : options
+
+            const authorIds = input.map(({ id }) => id)
+
+            const authorSongs = await this.#songService.getRecentByAuthor(authorIds, options)
+
+            return input.flatMap((entity) => {
+                return (
+                    authorSongs[entity.id]?.map((s) => {
+                        return { ...entity, author_id: entity.id, id: s.id }
+                    }) || []
+                )
+            })
+        }
 
     /**
      * Takes specified amount from input.
@@ -344,18 +436,17 @@ async function main() {
     const flow = (...f) => R.pipeWith(R.andThen)(f)
     const merge = (...f) => R.converge(recs.merge, f)
 
-    const recommendationsFlow = 
-        flow(
-            recs.user,
-            merge(recs.liked(config.signals), recs.saved(config.signals)),
-            recs.dedupe('id'),
-            recs.set('id', 'recommender'),
-            recs.similar(config.songsRecommendations),
-            recs.dedupe('id'),
-            recs.diversify('recommender'),
-            recs.take(5),
-            recs.enrichSong
-        )
+    const recommendationsFlow = flow(
+        recs.user,
+        merge(recs.liked(config.signals), recs.saved(config.signals)),
+        recs.dedupe('id'),
+        recs.set('id', 'recommender'),
+        recs.similar(config.songsRecommendations),
+        recs.dedupe('id'),
+        recs.diversify('recommender'),
+        recs.take(5),
+        recs.enrichSong
+    )
 
     const recommendations = await recommendationsFlow(users.Joe.id)
 
