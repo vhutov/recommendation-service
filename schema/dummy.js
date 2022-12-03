@@ -47,4 +47,9 @@ const user_saved_songs = [
     { user_id: users.Joe.id, song_id: songs.EnterSandman.id, event_time: toSql(DateTime.now()) }
 ]
 
-module.exports = { users, authors, songs, user_liked_songs, user_saved_songs }
+const similar_songs = {
+    [songs.Immortalized.id]: [songs.TheSoundOfSilence.id, songs.Bulletproof.id],
+    [songs.RapGod.id]: [songs.BestFrield.id]
+}
+
+module.exports = { users, authors, songs, user_liked_songs, user_saved_songs, similar_songs }

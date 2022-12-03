@@ -2,6 +2,7 @@ const config = require('./config')
 const dummy = require('./schema/dummy')
 const fs = require('fs')
 const knex = require('knex')
+const redis = require('redis')
 
 /**
  * @param {knex.Knex} db
@@ -48,11 +49,26 @@ async function dropTable() {
     } catch (error) {}
 }
 
+/**
+ * 
+ * @param {redis.RedisClientType} redis 
+ */
+async function insertSimilar(redis) {
+    for (let [key, vals] of Object.entries(dummy.similar_songs)) {
+        const redis_key = `${config.songsRecommendations.indexName}:${key}`
+        await redis.del(redis_key)
+        await redis.lPush(redis_key, vals.map(String))
+    }
+}
+
 async function main() {
     /**
      * @type {knex.Knex}
      */
     const db = knex(config.db)
+
+    const redisClient = redis.createClient(config.redis)
+    await redisClient.connect()
 
     await dropTable()
     console.log('Dropped database')
@@ -61,7 +77,11 @@ async function main() {
     await insertDb(db)
     console.log('Dummy data insertion complete')
 
+    await insertSimilar(redisClient)
+    console.log('Similarity insertion complete.')
+
     await db.destroy()
+    await redisClient.disconnect()
 }
 
 main()

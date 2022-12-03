@@ -70,6 +70,16 @@ class UserService {
     }
 }
 
+class SimilarityService {
+    /**
+     * For provided entity ids fetches similar entities
+     * @param {number[]} ids 
+     * @param {{indexName: string, fan_out: ?number}} options
+     * @returns {Promise<Object.<number, number[]>>} dict of similar entities
+     */
+    getSimilar = async (ids, { indexName, fan_out = 10 }) => {}
+}
+
 async function main() {
     /**
      * @type {knex.Knex}

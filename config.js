@@ -6,4 +6,13 @@ module.exports = {
         },
         useNullAsDefault: true,
     },
+    redis: {
+        socket: {
+            host: 'localhost',
+        },
+    },
+    songsRecommendations: {
+        indexName: 'songs_collab_v1',
+        fan_out: 5,
+    },
 }
