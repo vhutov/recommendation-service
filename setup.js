@@ -2,12 +2,6 @@ const config = require('./config')
 const dummy = require('./schema/dummy')
 const fs = require('fs')
 const knex = require('knex')
-const { mainModule } = require('process')
-
-/**
- * @type {knex.Knex}
- */
-const db = knex(config.db)
 
 /**
  * @param {knex.Knex} db
@@ -47,12 +41,15 @@ async function dropTable() {
     try {
         await fs.promises.access(f, fs.constants.F_OK)
         await fs.promises.rm(f)
-    } catch (error) {
-        console.log('Did not delete table', error)
-    }
+    } catch (error) {}
 }
 
 async function main() {
+    /**
+     * @type {knex.Knex}
+     */
+    const db = knex(config.db)
+
     await dropTable()
     console.log('Dropped database')
     await prepareTables(db)
@@ -62,6 +59,5 @@ async function main() {
 
     await db.destroy()
 }
-
 
 main()
