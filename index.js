@@ -3,6 +3,7 @@ const { users } = require('./schema/dummy')
 
 const knex = require('knex')
 const { DateTime } = require('luxon')
+const redis = require('redis')
 
 class UserService {
     /**
@@ -72,12 +73,40 @@ class UserService {
 
 class SimilarityService {
     /**
+     * @type {redis.RedisClientType}
+     */
+    #redis
+
+    /**
+     *
+     * @param {redis.RedisClientType} redis
+     */
+    constructor(redis) {
+        this.#redis = redis
+    }
+
+    /**
      * For provided entity ids fetches similar entities
-     * @param {number[]} ids 
+     * @param {number[]} ids
      * @param {{indexName: string, fan_out: ?number}} options
      * @returns {Promise<Object.<number, number[]>>} dict of similar entities
      */
-    getSimilar = async (ids, { indexName, fan_out = 10 }) => {}
+    getSimilar = async (ids, { indexName, fan_out = 10 }) => {
+        const key = SimilarityService.#redisKey(indexName)
+
+        const pendingSimilarities = ids.map(async (id) => {
+            const similarIds = await this.#redis.lRange(key(id), 0, fan_out)
+
+            if (similarIds.length == 0) return null
+            return [id, similarIds.map(Number)]
+        })
+
+        const similarities = (await Promise.allSettled(pendingSimilarities)).filter((r) => r.value).map((r) => r.value)
+
+        return Object.fromEntries(similarities)
+    }
+
+    static #redisKey = (indexName) => (id) => `${indexName}:${id}`
 }
 
 async function main() {
@@ -85,15 +114,22 @@ async function main() {
      * @type {knex.Knex}
      */
     const db = knex(config.db)
+    const redisClient = redis.createClient(config.redis)
+    await redisClient.connect()
 
     const userService = new UserService(db)
+    const similarityService = new SimilarityService(redisClient)
 
-    const date = DateTime.now().minus({ days: 1 })
+    const date = DateTime.now().minus({ days: 2 })
     const options = { last_ts: date.toUnixInteger() }
 
     const [liked, saved] = await Promise.all([
-        userService.getRecentLikedIds(users.Joe.id, options),
-        userService.getRecentSavedIds(users.Joe.id, options),
+        userService
+            .getRecentLikedIds(users.Joe.id, options)
+            .then((liked) => similarityService.getSimilar(liked, config.songsRecommendations)),
+        userService
+            .getRecentSavedIds(users.Joe.id, options)
+            .then((saved) => similarityService.getSimilar(saved, config.songsRecommendations)),
     ])
 
     console.log('Liked', liked)
@@ -102,6 +138,7 @@ async function main() {
     console.log()
 
     await db.destroy()
+    await redisClient.disconnect()
 }
 
 main()
