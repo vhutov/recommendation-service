@@ -7,14 +7,18 @@ const knex = require('knex')
  * @param {knex.Knex} db
  */
 async function prepareTables(db) {
-    const files = await fs.promises.readdir('./schema/sql')
 
-    for (const file of files) {
-        if (!file.endsWith('.sql')) continue
+    for (const [dir, type] of [['sql', 'table'], ['index', 'index']]) {
+        const parent = `./schema/${dir}`
+        const files = await fs.promises.readdir(parent)
 
-        const sql = (await fs.promises.readFile(`./schema/sql/${file}`)).toString()
-        await db.raw(sql)
-        console.log('Created table ', file.trim('.sql'))
+        for (const file of files) {
+            if (!file.endsWith('.sql')) continue
+
+            const sql = (await fs.promises.readFile(`${parent}/${file}`)).toString()
+            await db.raw(sql)
+            console.log(`Created ${type} `, file.trim('.sql'))
+        }
     }
 }
 
