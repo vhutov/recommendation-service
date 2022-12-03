@@ -1,3 +1,5 @@
+const { DateTime } = require("luxon");
+
 const id = (id) => () => {
     return id++;
 }
@@ -29,13 +31,20 @@ const songs = {
     'BestFrield': { id: song_id(), name: 'Best Friend', length: 270, genre: 'Hip-Hop', author_id: authors.Yelawolf.id },
 }
 
+/**
+ * 
+ * @param {DateTime} date 
+ * @returns {string}
+ */
+const toSql = (date) => date.toSQL({includeOffset: false, includeOffsetSpace: false, includeZone: false})
+
 const user_liked_songs = [
-    { user_id: users.Joe.id, song_id: songs.Immortalized.id },
-    { user_id: users.Mike.id, song_id: songs.RapGod.id }
+    { user_id: users.Joe.id, song_id: songs.Immortalized.id, event_time: toSql(DateTime.now().minus({ days: 1 }))},
+    { user_id: users.Mike.id, song_id: songs.RapGod.id, event_time: toSql(DateTime.now())}
 ]
 
 const user_saved_songs = [
-    { user_id: users.Joe.id, song_id: songs.EnterSandman.id }
+    { user_id: users.Joe.id, song_id: songs.EnterSandman.id, event_time: toSql(DateTime.now()) }
 ]
 
 module.exports = { users, authors, songs, user_liked_songs, user_saved_songs }

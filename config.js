@@ -4,5 +4,6 @@ module.exports = {
         connection: {
             filename: './db.dat',
         },
+        useNullAsDefault: true,
     },
 }
