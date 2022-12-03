@@ -21,6 +21,9 @@ module.exports = {
         indexName: 'authors_collab_v1',
         fan_out: 3
     },
+    authorSongs: {
+        fan_out: 2
+    },
     signals: () => ({
         last_ts: DateTime.now().minus({ days: 2 }).toUnixInteger(),
         limit: 50,

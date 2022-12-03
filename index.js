@@ -76,7 +76,28 @@ class UserService {
      * @param {{last_ts: ?number, limit: ?number}} options
      * @returns {Promise<number[]>} list of author ids
      */
-    getRecentLikedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+    getRecentLikedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {
+        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
+        const limit_clause = limit ? `LIMIT ${limit}` : ''
+
+        const rows = await this.#db.raw(`
+            SELECT 
+                s.author_id as id
+            FROM 
+                users_liked_songs AS uls
+            JOIN
+                songs AS s
+                ON uls.song_id = s.id
+            WHERE 
+                user_id = ${userId}
+                ${ts_filter}
+            ORDER BY 
+                event_time DESC
+            ${limit_clause}
+        `)
+
+        return rows.map(({ id }) => id)
+    }
 
     /**
      * Get list of recentlysaved author ids
@@ -84,7 +105,28 @@ class UserService {
      * @param {{last_ts: ?number, limit: ?number}} options
      * @returns {Promise<number[]>} list of author ids
      */
-    getRecentSavedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {}
+    getRecentSavedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {
+        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
+        const limit_clause = limit ? `LIMIT ${limit}` : ''
+
+        const rows = await this.#db.raw(`
+            SELECT 
+                s.author_id as id
+            FROM 
+                users_saved_songs AS uss
+            JOIN
+                songs AS s
+                ON uss.song_id = s.id
+            WHERE 
+                user_id = ${userId}
+                ${ts_filter}
+            ORDER BY 
+                event_time DESC
+            ${limit_clause}
+        `)
+
+        return rows.map(({ id }) => id)
+    }
 }
 
 class SongService {
@@ -105,7 +147,29 @@ class SongService {
      * @param {{fan_out: ?number}} options fan_out specifies how many songs per author
      * @returns {Promise<Object.<number, number[]>>} list of songs per author
      */
-    getRecentByAuthor = async (authorIds, { fan_out = null } = {}) => {}
+    getRecentByAuthor = async (authorIds, { fan_out = null } = {}) => {
+        const rows = await this.#db.raw(`
+            SELECT 
+                id as song_id, 
+                author_id
+            FROM 
+                songs
+            WHERE 
+                author_id IN (${authorIds.join(',')})
+        `)
+
+        const maybeLimitWithinAuthor = R.ifElse(
+            R.always(fan_out != null),
+            R.pipe(
+                R.toPairs,
+                R.map(([k, v]) => [k, v.slice(0, fan_out)]),
+                R.fromPairs
+            ),
+            R.identity
+        )
+
+        return R.pipe(R.groupBy(R.prop('author_id')), maybeLimitWithinAuthor, R.mapObjIndexed(R.pluck('song_id')))(rows)
+    }
 }
 
 class SimilarityService {
@@ -364,7 +428,7 @@ class RecommendationService {
             return input.flatMap((entity) => {
                 return (
                     authorSongs[entity.id]?.map((s) => {
-                        return { ...entity, author_id: entity.id, id: s.id }
+                        return { ...entity, author_id: entity.id, id: s }
                     }) || []
                 )
             })
@@ -430,19 +494,21 @@ async function main() {
     const userService = new UserService(db)
     const similarityService = new SimilarityService(redisClient)
     const enrichmentService = new EnrichmentService(db)
+    const songService = new SongService(db)
 
-    const recs = new RecommendationService(userService, similarityService, enrichmentService)
+    const recs = new RecommendationService(userService, similarityService, enrichmentService, songService)
 
     const flow = (...f) => R.pipeWith(R.andThen)(f)
     const merge = (...f) => R.converge(recs.merge, f)
 
     const recommendationsFlow = flow(
         recs.user,
-        merge(recs.liked(config.signals), recs.saved(config.signals)),
+        merge(recs.likedAuthors(config.signals), recs.savedAuthors(config.signals)),
         recs.dedupe('id'),
         recs.set('id', 'recommender'),
-        recs.similar(config.songsRecommendations),
+        recs.similar(config.authorsRecommendations),
         recs.dedupe('id'),
+        recs.recentSongs(config.authorSongs),
         recs.diversify('recommender'),
         recs.take(5),
         recs.enrichSong
