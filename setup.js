@@ -59,6 +59,12 @@ async function insertSimilar(redis) {
         await redis.del(redis_key)
         await redis.lPush(redis_key, vals.map(String))
     }
+
+    for (let [key, vals] of Object.entries(dummy.similar_authors)) {
+        const redis_key = `${config.authorsRecommendations.indexName}:${key}`
+        await redis.del(redis_key)
+        await redis.lPush(redis_key, vals.map(String))
+    }
 }
 
 async function main() {

@@ -17,6 +17,10 @@ module.exports = {
         indexName: 'songs_collab_v1',
         fan_out: 5,
     },
+    authorsRecommendations: {
+        indexName: 'authors_collab_v1',
+        fan_out: 3
+    },
     signals: () => ({
         last_ts: DateTime.now().minus({ days: 2 }).toUnixInteger(),
         limit: 50,

@@ -52,4 +52,9 @@ const similar_songs = {
     [songs.RapGod.id]: [songs.BestFrield.id]
 }
 
-module.exports = { users, authors, songs, user_liked_songs, user_saved_songs, similar_songs }
+const similar_authors = {
+    [authors.Disturbed.id]: [authors.Metallica.id],
+    [authors.Metallica.id]: [authors.Godsmack.id, authors.ACDC.id]
+}
+
+module.exports = { users, authors, songs, user_liked_songs, user_saved_songs, similar_songs, similar_authors }
