@@ -127,7 +127,18 @@ class EnrichmentService {
      * @param {number[]} songIds
      * @returns {Promise<Object.<string, any>>} enriched songs data
      */
-    enrichSongData = async (songIds) => {}
+    enrichSongData = async (songIds) => {
+        const rows = await this.#db.raw(`
+            SELECT 
+                *
+            FROM 
+                songs
+            WHERE 
+                id IN (${songIds.join(',')})`   
+        )
+
+        return rows
+    }
 }
 
 async function main() {
@@ -161,7 +172,6 @@ async function main() {
     console.log('Liked', liked)
     console.log('Saved', saved)
 
-    console.log()
 
     await db.destroy()
     await redisClient.disconnect()
