@@ -4,6 +4,8 @@ const { users } = require('./schema/dummy')
 const knex = require('knex')
 const { DateTime } = require('luxon')
 const redis = require('redis')
+const R = require('ramda')
+const _ = require('lodash')
 
 class UserService {
     /** @type {knex.Knex} */
@@ -134,6 +136,13 @@ class EnrichmentService {
     }
 }
 
+/**
+ * @template A
+ * @param {A|A[]} input
+ * @returns {A[]}
+ */
+const toArray = (input) => (Array.isArray(input) ? input : [input])
+
 class RecommendationService {
     /** @type {UserService} */
     #userService
@@ -159,7 +168,11 @@ class RecommendationService {
      * @param {number|number[]} input
      * @returns {Promise<Entity[]>} input as user id
      */
-    user = async (input) => {}
+    user = async (input) => {
+        input = toArray(input)
+
+        return input.map(R.objOf('id'))
+    }
 
     /**
      * Copies property value to another property
@@ -169,7 +182,11 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} entities with new property set
      */
-    set = (from, to) => async (input) => {}
+    set = (from, to) => async (input) => {
+        input = toArray(input)
+
+        return input.map((entity) => ({ ...entity, [to]: entity[from] }))
+    }
 
     /**
      * Finds similar entities. Copies properties from parent to children.
@@ -178,7 +195,22 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} similar entities for every entity from input
      */
-    similar = (options) => async (input) => {}
+    similar = (options) => async (input) => {
+        input = toArray(input)
+
+        const ids = input.map(R.prop('id'))
+
+        const similarMap = await this.#similarityService.getSimilar(ids, options)
+
+        return input.flatMap((entity) => {
+            const similar = similarMap[entity.id] || []
+
+            return similar.map((id) => ({
+                ...entity,
+                id,
+            }))
+        })
+    }
 
     /**
      * Enriches Song Entities with song data
@@ -186,7 +218,39 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} input entities, enriched with songs data
      */
-    enrichSong = async (input) => {}
+    enrichSong = async (input) => {
+        input = toArray(input)
+
+        const ids = input.map(R.prop('id'))
+
+        const songData = await this.#enrichmentService.enrichSongData(ids)
+
+        const dataMap = R.indexBy(R.prop('id'))(songData)
+
+        return input.map((entity) => ({ ...entity, ...dataMap[entity.id] }))
+    }
+
+    /**
+     * @typedef {Object.<string, any>} Entity
+     * @param {Entity|Entity[]} input
+     * @param {function(number): Promise<number[]>} f
+     * @returns
+     */
+    #signals = async (input, f) => {
+        input = toArray(input)
+
+        const pendingSignals = input.map(async (entity) => {
+            const ids = await f(entity.id)
+            if (!ids) return null
+            return [entity, ids]
+        })
+
+        const signals = (await Promise.allSettled(pendingSignals)).filter((v) => v.value).map(v => v.value)
+
+        return signals.flatMap(([{ id, ...rest }, signals]) => {
+            return signals.map((s) => ({ id: s, user: id, ...rest }))
+        })
+    }
 
     /**
      * For User Entities fetches Song Entities. Copies over properties from parent to children.
@@ -197,7 +261,8 @@ class RecommendationService {
      */
     liked =
         (options = {}) =>
-        async (input) => {}
+        async (input) =>
+            this.#signals(input, (id) => this.#userService.getRecentLikedIds(id, options))
 
     /**
      * For User Entities fetches Song Entities. Copies over properties from parent to children.
@@ -208,7 +273,8 @@ class RecommendationService {
      */
     saved =
         (options = {}) =>
-        async (input) => {}
+        async (input) =>
+            this.#signals(input, (id) => this.#userService.getRecentSavedIds(id, options))
 
     /**
      * Takes specified amount from input.
@@ -217,7 +283,11 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} same as input but only [limit] elements
      */
-    take = (limit) => async (input) => {}
+    take = (limit) => async (input) => {
+        input = toArray(input)
+
+        return input.slice(0, limit)
+    }
 
     /**
      * Merges few flows into single flow
@@ -225,7 +295,11 @@ class RecommendationService {
      * @param  {...Promise<Entity[]>} flows
      * @returns {Promise<Entity[]>} multiple flows merged together
      */
-    merge = async (...flows) => {}
+    merge = async (...flows) => {
+        const inputs = (await Promise.allSettled(flows)).filter((v) => v.value).map((v) => v.value)
+
+        return inputs.flat()
+    }
 
     /**
      * Deduplicates entities by specified property
@@ -234,7 +308,11 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} same as input but deduplicated
      */
-    dedupe = (by) => async (input) => {}
+    dedupe = (by) => async (input) => {
+        input = toArray(input)
+
+        return R.uniqBy(R.prop(by))(input)
+    }
 
     /**
      * Tries to sort values in a way that puts similar items further away from
@@ -244,7 +322,7 @@ class RecommendationService {
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} same as input
      */
-    diversify = (by) => async (input) => {}
+    diversify = (by) => async (input) => _.shuffle(toArray(input))
 }
 
 async function main() {
@@ -264,12 +342,12 @@ async function main() {
     const date = DateTime.now().minus({ days: 2 })
     const options = { last_ts: date.toUnixInteger() }
 
-    const user = recs.user(users.Joe.id)
+    const user = await recs.user(users.Joe.id)
 
     const recommendations = await recs
         .merge(recs.liked(options)(user), recs.saved(options)(user))
         .then(recs.similar(config.songsRecommendations))
-        .then(recs.enrichSongData)
+        .then(recs.enrichSong)
 
     console.log('Recommendations', recommendations)
 
