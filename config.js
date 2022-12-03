@@ -1,3 +1,5 @@
+const { DateTime } = require('luxon')
+
 module.exports = {
     db: {
         client: 'sqlite3',
@@ -15,4 +17,8 @@ module.exports = {
         indexName: 'songs_collab_v1',
         fan_out: 5,
     },
+    signals: () => ({
+        last_ts: DateTime.now().minus({ days: 2 }).toUnixInteger(),
+        limit: 50,
+    }),
 }

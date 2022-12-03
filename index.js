@@ -191,12 +191,14 @@ class RecommendationService {
     /**
      * Finds similar entities. Copies properties from parent to children.
      * @typedef {Object.<string, any>} Entity
-     * @param {*} options see SimilarityService#getSimilar options
+     * @param {Object|Function} options see SimilarityService#getSimilar options
      * @param {Entity|Entity[]} input
      * @returns {Promise<Entity[]>} similar entities for every entity from input
      */
     similar = (options) => async (input) => {
         input = toArray(input)
+
+        options = _.isFunction(options) ? options() : options
 
         const ids = input.map(R.prop('id'))
 
@@ -262,7 +264,7 @@ class RecommendationService {
     liked =
         (options = {}) =>
         async (input) =>
-            this.#signals(input, (id) => this.#userService.getRecentLikedIds(id, options))
+            this.#signals(input, (id) => this.#userService.getRecentLikedIds(id, _.isFunction(options) ? options() : options))
 
     /**
      * For User Entities fetches Song Entities. Copies over properties from parent to children.
@@ -274,7 +276,7 @@ class RecommendationService {
     saved =
         (options = {}) =>
         async (input) =>
-            this.#signals(input, (id) => this.#userService.getRecentSavedIds(id, options))
+            this.#signals(input, (id) => this.#userService.getRecentSavedIds(id, _.isFunction(options) ? options() : options))
 
     /**
      * Takes specified amount from input.
@@ -339,15 +341,23 @@ async function main() {
 
     const recs = new RecommendationService(userService, similarityService, enrichmentService)
 
-    const date = DateTime.now().minus({ days: 2 })
-    const options = { last_ts: date.toUnixInteger() }
+    const flow = (...f) => R.pipeWith(R.andThen)(f)
+    const merge = (...f) => R.converge(recs.merge, f)
 
-    const user = await recs.user(users.Joe.id)
+    const recommendationsFlow = 
+        flow(
+            recs.user,
+            merge(recs.liked(config.signals), recs.saved(config.signals)),
+            recs.dedupe('id'),
+            recs.set('id', 'recommender'),
+            recs.similar(config.songsRecommendations),
+            recs.dedupe('id'),
+            recs.diversify('recommender'),
+            recs.take(5),
+            recs.enrichSong
+        )
 
-    const recommendations = await recs
-        .merge(recs.liked(options)(user), recs.saved(options)(user))
-        .then(recs.similar(config.songsRecommendations))
-        .then(recs.enrichSong)
+    const recommendations = await recommendationsFlow(users.Joe.id)
 
     console.log('Recommendations', recommendations)
 
