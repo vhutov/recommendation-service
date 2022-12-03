@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS songs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name VARCHAR(32),
+    length INTEGER,
+    genre VARCHAR(32),
+    author_id INTEGER
+)

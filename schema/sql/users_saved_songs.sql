@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS users_saved_songs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    song_id INTEGER,
+    event_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
