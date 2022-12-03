@@ -109,6 +109,27 @@ class SimilarityService {
     static #redisKey = (indexName) => (id) => `${indexName}:${id}`
 }
 
+class EnrichmentService {
+    /**
+     * @type {knex.Knex}
+     */
+    #db
+
+    /**
+     * @type {knex.Knex}
+     */
+    constructor (db) {
+        this.#db = db
+    }
+
+    /**
+     * Gets song data from db
+     * @param {number[]} songIds
+     * @returns {Promise<Object.<string, any>>} enriched songs data
+     */
+    enrichSongData = async (songIds) => {}
+}
+
 async function main() {
     /**
      * @type {knex.Knex}
@@ -119,6 +140,7 @@ async function main() {
 
     const userService = new UserService(db)
     const similarityService = new SimilarityService(redisClient)
+    const enrichmentService = new EnrichmentService(db)
 
     const date = DateTime.now().minus({ days: 2 })
     const options = { last_ts: date.toUnixInteger() }
@@ -126,10 +148,14 @@ async function main() {
     const [liked, saved] = await Promise.all([
         userService
             .getRecentLikedIds(users.Joe.id, options)
-            .then((liked) => similarityService.getSimilar(liked, config.songsRecommendations)),
+            .then((liked) => similarityService.getSimilar(liked, config.songsRecommendations))
+            .then((values) => Object.values(values).flat())
+            .then((ids) => enrichmentService.enrichSongData(ids)),
         userService
             .getRecentSavedIds(users.Joe.id, options)
-            .then((saved) => similarityService.getSimilar(saved, config.songsRecommendations)),
+            .then((saved) => similarityService.getSimilar(saved, config.songsRecommendations))
+            .then((values) => Object.values(values).flat())
+            .then((ids) => enrichmentService.enrichSongData(ids)),
     ])
 
     console.log('Liked', liked)
