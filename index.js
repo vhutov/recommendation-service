@@ -2,7 +2,6 @@ const config = require('./config')
 const { users } = require('./schema/dummy')
 
 const knex = require('knex')
-const { DateTime } = require('luxon')
 const redis = require('redis')
 const R = require('ramda')
 const _ = require('lodash')
@@ -294,6 +293,20 @@ class RecommendationService {
     }
 
     /**
+     * Sets property with specified key-value
+     * @typedef {Object.<string, any>} Entity
+     * @param {string} key 
+     * @param {any} value 
+     * @param {Entity|Entity[]} input
+     * @returns {Promise<Entity[]>} entities with new property set
+     */
+    setVal = (key, value) => async (input) => {
+        input = toArray(input)
+
+        return R.map(R.assoc(key, value))(input)
+    }
+
+    /**
      * Finds similar entities. Copies properties from parent to children.
      * @typedef {Object.<string, any>} Entity
      * @param {Object|Function} options see SimilarityService#getSimilar options
@@ -481,6 +494,15 @@ class RecommendationService {
      * @returns {Promise<Entity[]>} same as input
      */
     diversify = (by) => async (input) => _.shuffle(toArray(input))
+
+    /**
+     * Sorts input by specified field
+     * @typedef {Object.<string, any>} Entity
+     * @param {string} by sorting column
+     * @param {Entity|Entity[]} input
+     * @returns {Promise<Entity[]>}
+     */
+    sort = (by) => async (input) => R.sortBy(R.prop(by))(toArray(input))
 }
 
 async function main() {
@@ -501,17 +523,39 @@ async function main() {
     const flow = (...f) => R.pipeWith(R.andThen)(f)
     const merge = (...f) => R.converge(recs.merge, f)
 
-    const recommendationsFlow = flow(
+    /** @type {function(number|number[]): Promise<Object[]>} */
+    const songFlow = flow(
+        recs.user,
+        merge(recs.liked(config.signals), recs.saved(config.signals)),
+        recs.dedupe('id'),
+        recs.set('id', 'recommender'),
+        recs.setVal('flow', 'song'),
+        recs.similar(config.songsRecommendations),
+        recs.dedupe('id'),
+        recs.diversify('recommender'),
+        recs.take(5),
+    )
+
+    /** @type {function(number|number[]): Promise<Object[]>} */
+    const authorFlow = flow(
         recs.user,
         merge(recs.likedAuthors(config.signals), recs.savedAuthors(config.signals)),
         recs.dedupe('id'),
         recs.set('id', 'recommender'),
+        recs.setVal('flow', 'author'),
         recs.similar(config.authorsRecommendations),
         recs.dedupe('id'),
         recs.recentSongs(config.authorSongs),
         recs.diversify('recommender'),
         recs.take(5),
-        recs.enrichSong
+    )
+
+    /** @type {function(number|number[]): Promise<Object[]>} */
+    const recommendationsFlow = flow(
+        merge(songFlow, authorFlow),
+        recs.dedupe('id'),
+        recs.enrichSong,
+        recs.sort('length')
     )
 
     const recommendations = await recommendationsFlow(users.Joe.id)
