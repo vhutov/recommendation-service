@@ -3,6 +3,7 @@ const { users } = require('./schema/dummy')
 
 const knex = require('knex')
 const { DateTime } = require('luxon')
+const redis = require('redis')
 
 class UserService {
     /**
@@ -28,14 +29,14 @@ class UserService {
         const limit_clause = limit ? `LIMIT ${limit}` : ''
 
         const rows = await this.#db.raw(`
-            SELECT 
+            SELECT
                 song_id as id
-            FROM 
+            FROM
                 users_liked_songs
-            WHERE 
+            WHERE
                 user_id = ${userId}
                 ${ts_filter}
-            ORDER BY 
+            ORDER BY
                 event_time DESC
             ${limit_clause}
         `)
@@ -54,14 +55,14 @@ class UserService {
         const limit_clause = limit ? `LIMIT ${limit}` : ''
 
         const rows = await this.#db.raw(`
-            SELECT 
+            SELECT
                 song_id as id
-            FROM 
+            FROM
                 users_saved_songs
-            WHERE 
+            WHERE
                 user_id = ${userId}
                 ${ts_filter}
-            ORDER BY 
+            ORDER BY
                 event_time DESC
             ${limit_clause}
         `)
@@ -71,13 +72,25 @@ class UserService {
 }
 
 class SimilarityService {
+
+    /** @type {redis.RedisClientType} */
+    #redis
+
+    /**
+    *
+    * @param {redis.RedisClientType} redis
+    */
+    constructor(redis) {
+        this.#redis = redis
+    }
+
     /**
      * For provided entity ids fetches similar entities
-     * @param {number[]} ids 
+     * @param {number[]} ids
      * @param {{indexName: string, fan_out: ?number}} options
      * @returns {Promise<Object.<number, number[]>>} dict of similar entities
      */
-    getSimilar = async (ids, { indexName, fan_out = 10 }) => {}
+    getSimilar = async (ids, { indexName, fan_out = 10 }) => { }
 }
 
 async function main() {
