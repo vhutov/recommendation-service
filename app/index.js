@@ -31,12 +31,21 @@ async function main() {
     const flow = (...f) => R.pipeWith(R.andThen)(f)
     const merge = (...f) => R.converge(recs.merge, f)
 
+    const similar = (flowName, config) => flow(
+        recs.setVal('index', flowName),
+        recs.similar(config),
+    )
+
     const recsFlow = flow(
         recs.author,
         recs.set('id', 'recommender'),
         recs.enrichAuthor,
         recs.set('name', 'recommender_name'),
-        recs.similar(config.recs.author.collab.negative.small),
+        merge(
+            similar('negative', config.recs.author.collab.negative.small),
+            similar('partial', config.recs.author.collab.partial),
+            similar('full', config.recs.author.collab.big)
+        ),
         recs.dedupe('id'),
         recs.diversify('recommender'),
         recs.take(20),
@@ -82,7 +91,7 @@ async function main() {
 
     // const recommendations = await recommendationsFlow(users.Joe.id)
 
-    const recommendations = await recsFlow(['711MCceyCBcFnzjGY4Q7Un', '2ye2Wgw4gimLv2eAKyk1NB'])
+    const recommendations = await recsFlow(['711MCceyCBcFnzjGY4Q7Un', '2ye2Wgw4gimLv2eAKyk1NB', '7dGJo4pcD2V6oG8kP0tJRR'])
 
     const names = recommendations.map(R.prop('name'))
 
