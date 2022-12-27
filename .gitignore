@@ -1,2 +1,4 @@
 node_modules/
 db.dat
+.DS_Store
+.vscode/

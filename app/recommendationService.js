@@ -1,240 +1,10 @@
-const config = require('./config')
-const { users } = require('./schema/dummy')
-
-const knex = require('knex')
-const redis = require('redis')
 const R = require('ramda')
 const _ = require('lodash')
 
-class UserService {
-    /** @type {knex.Knex} */
-    #db
-
-    /**
-     * @param {knex.Knex} db
-     */
-    constructor(db) {
-        this.#db = db
-    }
-
-    /**
-     * Gets list of recently liked song ids
-     * @param {number} userId
-     * @param {{last_ts: ?number, limit: ?number}} options
-     * @returns {Promise<number[]>} list of song ids
-     */
-    getRecentLikedIds = async (userId, { last_ts = null, limit = null } = {}) => {
-        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
-        const limit_clause = limit ? `LIMIT ${limit}` : ''
-
-        const rows = await this.#db.raw(`
-            SELECT 
-                song_id as id
-            FROM 
-                users_liked_songs
-            WHERE 
-                user_id = ${userId}
-                ${ts_filter}
-            ORDER BY 
-                event_time DESC
-            ${limit_clause}
-        `)
-
-        return rows.map(({ id }) => id)
-    }
-
-    /**
-     * Gets list of recently saved song ids
-     * @param {number} userId
-     * @param {{last_ts: ?number, limit: ?number}} options
-     * @returns {Promise<number[]>} list of song ids
-     */
-    getRecentSavedIds = async (userId, { last_ts = null, limit = null } = {}) => {
-        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
-        const limit_clause = limit ? `LIMIT ${limit}` : ''
-
-        const rows = await this.#db.raw(`
-            SELECT 
-                song_id as id
-            FROM 
-                users_saved_songs
-            WHERE 
-                user_id = ${userId}
-                ${ts_filter}
-            ORDER BY 
-                event_time DESC
-            ${limit_clause}
-        `)
-
-        return rows.map(({ id }) => id)
-    }
-
-    /**
-     * Get list of recently liked author ids
-     * @param {number} userId
-     * @param {{last_ts: ?number, limit: ?number}} options
-     * @returns {Promise<number[]>} list of author ids
-     */
-    getRecentLikedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {
-        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
-        const limit_clause = limit ? `LIMIT ${limit}` : ''
-
-        const rows = await this.#db.raw(`
-            SELECT 
-                s.author_id as id
-            FROM 
-                users_liked_songs AS uls
-            JOIN
-                songs AS s
-                ON uls.song_id = s.id
-            WHERE 
-                user_id = ${userId}
-                ${ts_filter}
-            ORDER BY 
-                event_time DESC
-            ${limit_clause}
-        `)
-
-        return rows.map(({ id }) => id)
-    }
-
-    /**
-     * Get list of recentlysaved author ids
-     * @param {number} userId
-     * @param {{last_ts: ?number, limit: ?number}} options
-     * @returns {Promise<number[]>} list of author ids
-     */
-    getRecentSavedAuthorIds = async (userId, { last_ts = null, limit = null } = {}) => {
-        const ts_filter = last_ts ? `AND event_time >= datetime(${last_ts}, 'unixepoch')` : ''
-        const limit_clause = limit ? `LIMIT ${limit}` : ''
-
-        const rows = await this.#db.raw(`
-            SELECT 
-                s.author_id as id
-            FROM 
-                users_saved_songs AS uss
-            JOIN
-                songs AS s
-                ON uss.song_id = s.id
-            WHERE 
-                user_id = ${userId}
-                ${ts_filter}
-            ORDER BY 
-                event_time DESC
-            ${limit_clause}
-        `)
-
-        return rows.map(({ id }) => id)
-    }
-}
-
-class SongService {
-    /** @type {knex.Knex} */
-    #db
-
-    /**
-     * @param {knex.Knex} db
-     */
-    constructor(db) {
-        this.#db = db
-    }
-
-    /**
-     * Get list of recently added songs by author.
-     *
-     * @param {number[]} authorIds list of author ids
-     * @param {{fan_out: ?number}} options fan_out specifies how many songs per author
-     * @returns {Promise<Object.<number, number[]>>} list of songs per author
-     */
-    getRecentByAuthor = async (authorIds, { fan_out = null } = {}) => {
-        const rows = await this.#db.raw(`
-            SELECT 
-                id as song_id, 
-                author_id
-            FROM 
-                songs
-            WHERE 
-                author_id IN (${authorIds.join(',')})
-        `)
-
-        const maybeLimitWithinAuthor = R.ifElse(
-            R.always(fan_out != null),
-            R.pipe(
-                R.toPairs,
-                R.map(([k, v]) => [k, v.slice(0, fan_out)]),
-                R.fromPairs
-            ),
-            R.identity
-        )
-
-        return R.pipe(R.groupBy(R.prop('author_id')), maybeLimitWithinAuthor, R.mapObjIndexed(R.pluck('song_id')))(rows)
-    }
-}
-
-class SimilarityService {
-    /** @type {redis.RedisClientType} */
-    #redis
-
-    /**
-     *
-     * @param {redis.RedisClientType} redis
-     */
-    constructor(redis) {
-        this.#redis = redis
-    }
-
-    /**
-     * For provided entity ids fetches similar entities
-     * @param {number[]} ids
-     * @param {{indexName: string, fan_out: ?number}} options
-     * @returns {Promise<Object.<number, number[]>>} dict of similar entities
-     */
-    getSimilar = async (ids, { indexName, fan_out = 10 }) => {
-        const key = SimilarityService.#redisKey(indexName)
-
-        const pendingSimilarities = ids.map(async (id) => {
-            const similarIds = await this.#redis.lRange(key(id), 0, fan_out)
-
-            if (similarIds.length == 0) return null
-            return [id, similarIds.map(Number)]
-        })
-
-        const similarities = (await Promise.allSettled(pendingSimilarities)).filter((r) => r.value).map((r) => r.value)
-
-        return Object.fromEntries(similarities)
-    }
-
-    static #redisKey = (indexName) => (id) => `${indexName}:${id}`
-}
-
-class EnrichmentService {
-    /** @type {knex.Knex} */
-    #db
-
-    /**
-     * @param {knex.Knex} db
-     */
-    constructor(db) {
-        this.#db = db
-    }
-
-    /**
-     * Gets song data from db
-     * @param {number[]} songIds
-     * @returns {Promise<Object.<string, any>>} enriched songs data
-     */
-    enrichSongData = async (songIds) => {
-        const rows = await this.#db.raw(`
-            SELECT 
-                *
-            FROM 
-                songs
-            WHERE 
-                id IN (${songIds.join(',')})`)
-
-        return rows
-    }
-}
+const UserService = require('./userService')
+const SongService = require('./songService')
+const SimilarityService = require('./similarityService')
+const EnrichmentService = require('./enrichmentService')
 
 /**
  * @template A
@@ -266,17 +36,23 @@ class RecommendationService {
         this.#songService = songService
     }
 
+    #toObject = async (input) => {
+        input = toArray(input)
+
+        return input.map(R.objOf('id'))
+    }
+
     /**
      * Convert number (id) into User Entity
      * @typedef {Object.<string, any>} Entity
      * @param {number|number[]} input
      * @returns {Promise<Entity[]>} input as user id
      */
-    user = async (input) => {
-        input = toArray(input)
+    user = async (input) => this.#toObject(input)
 
-        return input.map(R.objOf('id'))
-    }
+    song = async (input) => this.#toObject(input)
+
+    author = async (input) => this.#toObject(input)
 
     /**
      * Copies property value to another property
@@ -348,6 +124,18 @@ class RecommendationService {
         const dataMap = R.indexBy(R.prop('id'))(songData)
 
         return input.map((entity) => ({ ...entity, ...dataMap[entity.id] }))
+    }
+
+    enrichAuthor = async (input) => {
+        input = toArray(input)
+
+        const ids = input.map(R.prop('id'))
+
+        const authorData = await this.#enrichmentService.enrichAuthorData(ids)
+
+        const dataMap = R.indexBy(R.prop('id'))(authorData)
+
+        return input.map((entity) => ({ ...entity, ...dataMap[entity.id]}))
     }
 
     /**
@@ -505,65 +293,4 @@ class RecommendationService {
     sort = (by) => async (input) => R.sortBy(R.prop(by))(toArray(input))
 }
 
-async function main() {
-    /**
-     * @type {knex.Knex}
-     */
-    const db = knex(config.db)
-    const redisClient = redis.createClient(config.redis)
-    await redisClient.connect()
-
-    const userService = new UserService(db)
-    const similarityService = new SimilarityService(redisClient)
-    const enrichmentService = new EnrichmentService(db)
-    const songService = new SongService(db)
-
-    const recs = new RecommendationService(userService, similarityService, enrichmentService, songService)
-
-    const flow = (...f) => R.pipeWith(R.andThen)(f)
-    const merge = (...f) => R.converge(recs.merge, f)
-
-    /** @type {function(number|number[]): Promise<Object[]>} */
-    const songFlow = flow(
-        recs.user,
-        merge(recs.liked(config.signals), recs.saved(config.signals)),
-        recs.dedupe('id'),
-        recs.set('id', 'recommender'),
-        recs.setVal('flow', 'song'),
-        recs.similar(config.songsRecommendations),
-        recs.dedupe('id'),
-        recs.diversify('recommender'),
-        recs.take(5),
-    )
-
-    /** @type {function(number|number[]): Promise<Object[]>} */
-    const authorFlow = flow(
-        recs.user,
-        merge(recs.likedAuthors(config.signals), recs.savedAuthors(config.signals)),
-        recs.dedupe('id'),
-        recs.set('id', 'recommender'),
-        recs.setVal('flow', 'author'),
-        recs.similar(config.authorsRecommendations),
-        recs.dedupe('id'),
-        recs.recentSongs(config.authorSongs),
-        recs.diversify('recommender'),
-        recs.take(5),
-    )
-
-    /** @type {function(number|number[]): Promise<Object[]>} */
-    const recommendationsFlow = flow(
-        merge(songFlow, authorFlow),
-        recs.dedupe('id'),
-        recs.enrichSong,
-        recs.sort('length')
-    )
-
-    const recommendations = await recommendationsFlow(users.Joe.id)
-
-    console.log('Recommendations', recommendations)
-
-    await db.destroy()
-    await redisClient.disconnect()
-}
-
-main()
+module.exports = RecommendationService
